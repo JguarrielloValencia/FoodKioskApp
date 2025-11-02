@@ -1,0 +1,29 @@
+id,category,name,price,stock,sold
+4001,Add-on,Extra Cheese,0.75,120,0
+4002,Add-on,Garlic Bread,2.25,53,0
+4004,Add-on,Marinara Dipping Sauce,0.50,78,0
+4005,Add-on,Olive Oil & Herb Dip,0.75,49,0
+4003,Add-on,Side Caesar Salad,3.50,55,0
+2007,Dessert,Bomboloni (Italian Donut),3.50,19,0
+2002,Dessert,Cannoli,3.95,12,0
+2006,Dessert,Gelato (Pistachio),4.25,17,0
+2005,Dessert,Gelato (Vanilla Bean),3.95,21,0
+2003,Dessert,Panna Cotta,4.50,16,2
+2004,Dessert,Ricotta Cheesecake,4.75,15,0
+2001,Dessert,Tiramisu,5.50,25,0
+3005,Food,Chicken Alfredo Pasta,7.95,16,2
+3007,Food,Gnocchi Pesto,7.75,26,0
+3006,Food,Lasagna Bolognese,8.50,17,3
+3001,Food,Margherita Pizza Slice,4.50,28,0
+3002,Food,Pepperoni Pizza Slice,4.75,25,0
+3003,Food,Prosciutto Panini,6.50,20,0
+3004,Food,Spaghetti & Meatballs,8.75,15,0
+1004,Italian Drink,Affogato,4.50,30,0
+1002,Italian Drink,Cappuccino,3.75,40,0
+1001,Italian Drink,Espresso,2.50,50,0
+1007,Italian Drink,Iced Americano,3.50,42,0
+1005,Italian Drink,Italian Soda (Blood Orange),3.25,45,0
+1003,Italian Drink,Latte Macchiato,4.00,35,0
+1006,Italian Drink,Limoncello Spritz (Non-Alcoholic),4.25,30,0
+5002,Seasonal Special,Panettone Slice,5.00,15,0
+5001,Seasonal Special,Pumpkin Risotto,9.25,15,15
