@@ -1,4 +1,6 @@
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
 import java.awt.*;
@@ -14,14 +16,40 @@ import java.util.*;
 import java.util.List;
 import java.util.stream.Collectors;
 
+
+/**
+ * <h1>Main GUI Program to find food kiosk and add them to cart!</h1>
+ * Swing-based graphical user interface for the Food Kiosk application.
+ * <p>
+ * Features:
+ * <ul>
+ *   <li>Inventory browsing with search and category filtering</li>
+ *   <li>Cart with quantity adjustments and line removal</li>
+ *   <li>Checkout with stock validation against the latest database snapshot</li>
+ *   <li>Admin login with restocking and viewing top sellers</li>
+ *   <li>Optional dark mode theme</li>
+ *   <li>CSV order logging to {@code orders.csv} for proof of transactions</li>
+ * </ul>
+ * <p>
+ * This UI relies on {@link Inventory} (MySQL-backed) and {@link Cart} to manage
+ * product data and cart contents.
+ * @author Joseph Guarriello
+ */
+
 public class KioskSwing extends JFrame {
-    private static final String INVENTORY_FILE = "products.txt"; // used once to seed DB if empty
+    /** Seed inventory file used if the database is empty on first run. */
+    private static final String INVENTORY_FILE = "products.txt";
+    /** CSV file used to log orders for proof/reporting purposes. */
     private static final String ORDERS_FILE = "orders.csv";
+    /** Simple demo admin PIN. Do not use in production. */
     private static final String ADMIN_PIN = "1234";
 
+    /** Currency formatter for U.S. dollars. */
     private final NumberFormat money = NumberFormat.getCurrencyInstance(Locale.US);
 
+    /** Inventory repository (MySQL-backed). */
     private final Inventory inventory = new Inventory();
+    /** In-memory shopping cart for the current session. */
     private final Cart cart = new Cart();
 
     // --- Inventory UI ---
@@ -55,6 +83,10 @@ public class KioskSwing extends JFrame {
     // --- Appearance ---
     private final JCheckBox darkModeToggle = new JCheckBox("Dark mode");
 
+    /**
+     * Constructs the kiosk Swing UI, initializes the database-backed inventory,
+     * wires all listeners, and builds the component layout.
+     */
     public KioskSwing() {
         super("Food Kiosk (MySQL)");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -141,7 +173,7 @@ public class KioskSwing extends JFrame {
         root.add(bottomBar, BorderLayout.SOUTH);
         setContentPane(root);
 
-        // actions
+        // wiring
         wireFiltering();
         wireActions();
 
@@ -149,6 +181,10 @@ public class KioskSwing extends JFrame {
         ensureOrdersHeader();
     }
 
+    /**
+     * Wires search field and category filter to reapply the inventory filter
+     * whenever input changes or category selection is updated.
+     */
     private void wireFiltering() {
         Runnable apply = () -> inventoryModel.applyFilter(
                 searchField.getText().trim(),
@@ -163,6 +199,10 @@ public class KioskSwing extends JFrame {
         categoryFilter.addActionListener(e -> apply.run());
     }
 
+    /**
+     * Wires button actions for add-to-cart, checkout, cart adjustments,
+     * and admin/top seller functions.
+     */
     private void wireActions() {
         addBtn.addActionListener(e -> onAddToCart());
         checkoutBtn.addActionListener(e -> onCheckout());
@@ -176,6 +216,10 @@ public class KioskSwing extends JFrame {
         topSellersBtn.addActionListener(e -> showTopSellersDialog());
     }
 
+    /**
+     * Adds the currently selected inventory item to the cart using the quantity
+     * from {@link #qtySpinner}, after validating stock and selection.
+     */
     private void onAddToCart() {
         int row = inventoryTable.getSelectedRow();
         if (row < 0) { info("Select an item first."); return; }
@@ -187,6 +231,12 @@ public class KioskSwing extends JFrame {
         refreshCartView();
     }
 
+    /**
+     * Adjusts the quantity of the selected cart line by the given delta.
+     * If the new quantity is less than or equal to zero, the line is removed.
+     *
+     * @param delta change in quantity (e.g., +1 for plus, -1 for minus)
+     */
     private void onAdjustCart(int delta) {
         int row = cartTable.getSelectedRow();
         if (row < 0) { info("Select a cart line first."); return; }
@@ -197,6 +247,9 @@ public class KioskSwing extends JFrame {
         refreshCartView();
     }
 
+    /**
+     * Removes the currently selected line item from the cart.
+     */
     private void onRemoveLine() {
         int row = cartTable.getSelectedRow();
         if (row < 0) { info("Select a cart line first."); return; }
@@ -205,6 +258,16 @@ public class KioskSwing extends JFrame {
         refreshCartView();
     }
 
+    /**
+     * Performs the checkout operation:
+     * <ul>
+     *   <li>Revalidates stock against the latest database state</li>
+     *   <li>Shows a confirmation dialog with cart summary and total</li>
+     *   <li>Applies the sale to the database</li>
+     *   <li>Logs the order to CSV</li>
+     *   <li>Clears the cart and refreshes inventory view</li>
+     * </ul>
+     */
     private void onCheckout() {
         if (cart.isEmpty()) { info("Cart is empty."); return; }
 
@@ -241,6 +304,13 @@ public class KioskSwing extends JFrame {
         ));
     }
 
+    /**
+     * Handles admin login (PIN-based) and restocking logic.
+     * <p>
+     * If not logged in, prompts for PIN and, if valid, enables admin features.
+     * If already logged in, treats the action as a restocking operation for
+     * the currently selected inventory row.
+     */
     private void onAdmin() {
         if (!adminLoggedIn) {
             String pin = JOptionPane.showInputDialog(this, "Enter admin PIN:");
@@ -268,11 +338,19 @@ public class KioskSwing extends JFrame {
         }
     }
 
+    /**
+     * Logs out the admin and returns the UI to customer mode.
+     */
     private void doLogout() {
         setAdminState(false);
         info("Admin logged out.");
     }
 
+    /**
+     * Updates UI state based on whether an admin is logged in.
+     *
+     * @param loggedIn {@code true} if admin is logged in; {@code false} otherwise
+     */
     private void setAdminState(boolean loggedIn) {
         this.adminLoggedIn = loggedIn;
         adminBtn.setText(loggedIn ? "Restock" : "Admin Login");
@@ -281,6 +359,9 @@ public class KioskSwing extends JFrame {
         adminStatus.setText(loggedIn ? "User: ADMIN" : "User: Customer");
     }
 
+    /**
+     * Displays the top 5 selling products in a modal dialog with a small table view.
+     */
     private void showTopSellersDialog() {
         List<Product> top = inventory.topSelling(5);
         if (top.isEmpty()) { info("No products."); return; }
@@ -308,6 +389,11 @@ public class KioskSwing extends JFrame {
     }
 
     // --- CSV order log (for proof) ---
+
+    /**
+     * Ensures the orders CSV file exists and has a header row. If the file
+     * does not exist, it is created with a CSV header.
+     */
     private void ensureOrdersHeader() {
         try {
             if (!Files.exists(Paths.get(ORDERS_FILE))) {
@@ -317,6 +403,13 @@ public class KioskSwing extends JFrame {
             }
         } catch (Exception ignored) {}
     }
+
+    /**
+     * Appends order lines to the CSV log for a completed order.
+     *
+     * @param lines      map of products to quantities purchased
+     * @param orderTotal total cost of the entire order
+     */
     private void writeOrder(Map<Product,Integer> lines, double orderTotal) {
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
         String ts = LocalDateTime.now().format(fmt);
@@ -330,16 +423,41 @@ public class KioskSwing extends JFrame {
             }
         } catch (Exception ignored) {}
     }
+
+    /**
+     * Sanitizes product names to be CSV-safe by removing commas.
+     *
+     * @param s original product name
+     * @return name with commas replaced by spaces
+     */
     private String sanitize(String s) { return s.replace(",", " "); }
 
     // --- UI helpers ---
+
+    /**
+     * Refreshes the cart table view and subtotal label based on the current
+     * contents of {@link #cart}.
+     */
     private void refreshCartView() {
         cartModel.setLines(cart.lines());
         subtotalLabel.setText("Subtotal: " + money.format(cart.subtotal()));
     }
+
+    /**
+     * Displays an informational message dialog.
+     *
+     * @param msg message to display
+     */
     private void info(String msg) {
         JOptionPane.showMessageDialog(this, msg, "Info", JOptionPane.INFORMATION_MESSAGE);
     }
+
+    /**
+     * Toggles between light and dark mode by adjusting component tree colors
+     * and table grid colors.
+     *
+     * @param on {@code true} to enable dark mode; {@code false} for default look
+     */
     private void setDarkMode(boolean on) {
         Color bg = on ? new Color(0x121212) : UIManager.getColor("Panel.background");
         Color fg = on ? new Color(0xEAEAEA) : UIManager.getColor("Label.foreground");
@@ -348,6 +466,15 @@ public class KioskSwing extends JFrame {
         cartTable.setGridColor(on ? new Color(0x2a2a2a) : Color.LIGHT_GRAY);
         repaint();
     }
+
+    /**
+     * Recursively sets background and foreground colors on the given component
+     * and its children.
+     *
+     * @param c  root component
+     * @param bg background color
+     * @param fg foreground color
+     */
     private void setComponentTreeColors(Component c, Color bg, Color fg) {
         if (c instanceof JComponent jc) {
             jc.setOpaque(true);
@@ -367,42 +494,86 @@ public class KioskSwing extends JFrame {
             for (Component child : cont.getComponents()) setComponentTreeColors(child, bg, fg);
         }
     }
+
+    /**
+     * Aligns numeric inventory columns (ID, price, stock) to the right for better readability.
+     */
     private void alignInventoryColumns() {
         rightAlignColumn(inventoryTable, 0); // ID
         rightAlignColumn(inventoryTable, 3); // Price
         rightAlignColumn(inventoryTable, 4); // Stock
     }
+
+    /**
+     * Aligns numeric cart columns (qty, price, line total) to the right.
+     */
     private void alignCartColumns() {
         rightAlignColumn(cartTable, 1); // Qty
         rightAlignColumn(cartTable, 2); // Price
         rightAlignColumn(cartTable, 3); // Line Total
     }
+
+    /**
+     * Sets a table column's cell renderer to right-align values.
+     *
+     * @param table table whose column should be aligned
+     * @param col   column index to right-align
+     */
     private static void rightAlignColumn(JTable table, int col) {
         DefaultTableCellRenderer r = new DefaultTableCellRenderer();
         r.setHorizontalAlignment(SwingConstants.RIGHT);
         table.getColumnModel().getColumn(col).setCellRenderer(r);
     }
+
+    /**
+     * Entry point for launching the Swing kiosk UI.
+     *
+     * @param args ignored
+     */
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> new KioskSwing().setVisible(true));
     }
 
     // ---------- Table models ----------
+
+    /**
+     * Simple data holder representing a line item in the cart table.
+     */
     private static class CartLine {
-        final Product product; final int qty; final double price;
+        final Product product;
+        final int qty;
+        final double price;
+
         CartLine(Product p, int q) { this.product = p; this.qty = q; this.price = p.getPrice(); }
+
         double lineTotal() { return price * qty; }
     }
+
+    /**
+     * Table model backing the cart table, showing item, quantity, price, and line total.
+     */
     private class CartTableModel extends AbstractTableModel {
         private final String[] cols = {"Item", "Qty", "Price", "Line Total"};
         private List<CartLine> rows = new ArrayList<>();
+
+        /**
+         * Rebuilds the internal list of cart lines from the given product-to-quantity map.
+         *
+         * @param map map of products to quantities
+         */
         void setLines(Map<Product,Integer> map) {
             rows = map.entrySet().stream().map(e -> new CartLine(e.getKey(), e.getValue())).collect(Collectors.toList());
             fireTableDataChanged();
         }
+
         CartLine getAt(int r) { return rows.get(r); }
+
         @Override public int getRowCount() { return rows.size(); }
+
         @Override public int getColumnCount() { return cols.length; }
+
         @Override public String getColumnName(int c) { return cols[c]; }
+
         @Override public Object getValueAt(int r, int c) {
             CartLine cl = rows.get(r);
             return switch (c) {
@@ -413,8 +584,14 @@ public class KioskSwing extends JFrame {
                 default -> "";
             };
         }
+
         @Override public Class<?> getColumnClass(int c) { return (c == 1) ? Integer.class : String.class; }
+
         @Override public boolean isCellEditable(int r, int c) { return c == 1; }
+
+        /**
+         * Allows editing of the quantity column; updates the underlying cart map accordingly.
+         */
         @Override public void setValueAt(Object aValue, int r, int c) {
             if (c != 1) return;
             try {
@@ -425,10 +602,28 @@ public class KioskSwing extends JFrame {
             } catch (NumberFormatException ignored) {}
         }
     }
+
+    /**
+     * Table model for displaying inventory rows with optional search and category filtering.
+     */
     private class InventoryTableModel extends AbstractTableModel {
         private final String[] cols = {"ID", "Category", "Name", "Price", "Stock"};
         private List<Product> filtered = new ArrayList<>();
+
+        /**
+         * Initializes the table model with the full product list,
+         * then applies a default filter (no search, "All" category).
+         *
+         * @param products product list to display
+         */
         void setRows(List<Product> products) { this.filtered = new ArrayList<>(products); applyFilter("", "All"); }
+
+        /**
+         * Applies text and category filters to rebuild the visible inventory list.
+         *
+         * @param query    search text (matches name or category, case-insensitive)
+         * @param category category filter, or {@code "All"} to show all
+         */
         void applyFilter(String query, String category) {
             String q = query.toLowerCase(Locale.ROOT);
             filtered = inventory.all().stream()
@@ -440,10 +635,15 @@ public class KioskSwing extends JFrame {
                     .collect(Collectors.toList());
             fireTableDataChanged();
         }
+
         Product getAt(int r) { return filtered.get(r); }
+
         @Override public int getRowCount() { return filtered.size(); }
+
         @Override public int getColumnCount() { return cols.length; }
+
         @Override public String getColumnName(int c) { return cols[c]; }
+
         @Override public Object getValueAt(int r, int c) {
             Product p = filtered.get(r);
             return switch (c) {
@@ -455,15 +655,16 @@ public class KioskSwing extends JFrame {
                 default -> "";
             };
         }
+
         @Override public Class<?> getColumnClass(int c) { return (c == 0 || c == 4) ? Integer.class : String.class; }
     }
 
-    // tiny doc listener helper
-    private static class SimpleDocListener implements javax.swing.event.DocumentListener {
-        private final Runnable r;
-        SimpleDocListener(Runnable r) { this.r = r; }
-        @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { r.run(); }
-        @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { r.run(); }
-        @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { r.run(); }
+    /**
+     * Tiny document-listener helper that calls a {@link Runnable} on any text change.
+     */
+    private record SimpleDocListener(Runnable r) implements DocumentListener {
+        @Override public void insertUpdate(DocumentEvent e) { r.run(); }
+        @Override public void removeUpdate(DocumentEvent e) { r.run(); }
+        @Override public void changedUpdate(DocumentEvent e) { r.run(); }
     }
 }

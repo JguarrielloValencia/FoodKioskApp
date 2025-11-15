@@ -3,16 +3,55 @@ import java.util.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+/**
+ * Inventory data-access layer backed by MySQL.
+ * <p>
+ * Responsibilities:
+ * <ul>
+ *   <li>Create/verify the {@code products} table schema on startup</li>
+ *   <li>Optionally import seed data from a CSV-like text file when the table is empty</li>
+ *   <li>CRUD-style read operations and small write operations (restock, apply sale)</li>
+ *   <li>Projection queries like top-selling products</li>
+ * </ul>
+ * <p>
+ * Table schema (created if missing):
+ * <pre>
+ * products(
+ *   id INT PRIMARY KEY,
+ *   category VARCHAR(50) NOT NULL,
+ *   name VARCHAR(100) NOT NULL,
+ *   price DECIMAL(10,2) NOT NULL,
+ *   stock INT NOT NULL,
+ *   sold INT NOT NULL DEFAULT 0
+ * )
+ * </pre>
+ *
+ * @author Joseph Guarriello
+ */
 public class Inventory {
-    // JDBC connection info
+    /** JDBC URL for the Food Kiosk database. */
     private static final String URL  = "jdbc:mysql://localhost:3306/foodkiosk?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC";
-    private static final String USER = "kiosk";       // or "root"
-    private static final String PASS = "Kiosk!234";   // your password
+    /** Database username (e.g., {@code kiosk} or {@code root}). */
+    private static final String USER = "kiosk";
+    /** Database password associated with {@link #USER}. */
+    private static final String PASS = "Kiosk!234";
 
+    /**
+     * Constructs an {@code Inventory} repo and ensures the schema exists.
+     * <p>
+     * Invokes {@link #ensureSchema()} which is idempotent and safe to run repeatedly.
+     */
     public Inventory() {
         ensureSchema();
     }
 
+    /**
+     * Ensures the {@code products} table exists and contains a {@code sold} column.
+     * <p>
+     * If {@code sold} is missing, it is added with a default of {@code 0}.
+     *
+     * @throws RuntimeException if schema validation or migrations fail
+     */
     private void ensureSchema() {
         try (Connection c = DriverManager.getConnection(URL, USER, PASS);
              Statement st = c.createStatement()) {
@@ -48,7 +87,16 @@ public class Inventory {
         }
     }
 
-    /** One-time import from products.txt if table empty. Format: id,category,name,price,stock */
+    /**
+     * One-time import from a text file <em>if and only if</em> the {@code products} table is empty.
+     * <p>
+     * Expected CSV-like format per line (header allowed, comments starting with {@code #} are ignored):
+     * <pre>id,category,name,price,stock</pre>
+     * Non-numeric IDs or malformed lines are skipped. Existing IDs are upserted.
+     *
+     * @param file path to the seed file (e.g., {@code products.txt})
+     * @throws RuntimeException if an IO/JDBC error occurs
+     */
     public void importFromFileIfEmpty(String file) {
         try (Connection c = DriverManager.getConnection(URL, USER, PASS);
              Statement st = c.createStatement()) {
@@ -56,11 +104,10 @@ public class Inventory {
                 rs.next();
                 if (rs.getInt(1) > 0) return; // already has data
             }
-            if (!Files.exists(Path.of(file))) return;
+            Path path = Path.of(file);
+            if (!Files.exists(path)) return;
 
-            // ... keep your method signature and earlier code the same ...
-
-            List<String> lines = Files.readAllLines(Path.of(file));
+            List<String> lines = Files.readAllLines(path);
             String sql = """
     INSERT INTO products(id,category,name,price,stock,sold)
     VALUES (?,?,?,?,?,0)
@@ -75,7 +122,7 @@ public class Inventory {
                         continue;
 
                     // handle possible UTF-8 BOM
-                    if (s.length() > 0 && s.charAt(0) == '\uFEFF') s = s.substring(1);
+                    if (s.charAt(0) == '\uFEFF') s = s.substring(1);
 
                     String[] p = s.split(",");
                     if (p.length < 5) continue;
@@ -99,7 +146,6 @@ public class Inventory {
                         ps.addBatch();
                     } catch (NumberFormatException badLine) {
                         // skip just this line; continue importing the rest
-                        continue;
                     }
                 }
                 ps.executeBatch();
@@ -110,6 +156,12 @@ public class Inventory {
         }
     }
 
+    /**
+     * Retrieves all products ordered by {@code id}.
+     *
+     * @return list of all {@link Product} rows
+     * @throws RuntimeException on JDBC errors
+     */
     public List<Product> all() {
         List<Product> out = new ArrayList<>();
         String sql = "SELECT id,category,name,price,stock,sold FROM products ORDER BY id";
@@ -123,6 +175,13 @@ public class Inventory {
         }
     }
 
+    /**
+     * Looks up a product by {@code id}.
+     *
+     * @param id product identifier
+     * @return an {@link Optional} containing the product if found; otherwise empty
+     * @throws RuntimeException on JDBC errors
+     */
     public Optional<Product> find(int id) {
         String sql = "SELECT id,category,name,price,stock,sold FROM products WHERE id=?";
         try (Connection c = DriverManager.getConnection(URL, USER, PASS);
@@ -137,6 +196,13 @@ public class Inventory {
         }
     }
 
+    /**
+     * Increments the stock of a given product.
+     *
+     * @param productId product identifier
+     * @param qty       quantity to add (maybe negative if you intend to decrement, though not recommended)
+     * @throws RuntimeException if the product does not exist or a JDBC error occurs
+     */
     public void restock(int productId, int qty) {
         String sql = "UPDATE products SET stock = stock + ? WHERE id = ?";
         try (Connection c = DriverManager.getConnection(URL, USER, PASS);
@@ -149,7 +215,12 @@ public class Inventory {
         }
     }
 
-    /** Apply sale: decrement stock, increment sold (transactional). */
+    /**
+     * Applies a sale transactionally by decrementing stock and incrementing sold for each line.
+     *
+     * @param lines map of {@link Product} to quantity sold
+     * @throws RuntimeException on JDBC/transaction errors
+     */
     public void applySale(Map<Product,Integer> lines) {
         String sql = "UPDATE products SET stock = stock - ?, sold = sold + ? WHERE id = ?";
         try (Connection c = DriverManager.getConnection(URL, USER, PASS);
@@ -168,6 +239,13 @@ public class Inventory {
         }
     }
 
+    /**
+     * Returns the top {@code n} products sorted by {@code sold} (descending) then {@code id} (ascending).
+     *
+     * @param n maximum number of rows to return (values &lt; 0 are treated as 0)
+     * @return list of top-selling products
+     * @throws RuntimeException on JDBC errors
+     */
     public List<Product> topSelling(int n) {
         List<Product> out = new ArrayList<>();
         String sql = "SELECT id,category,name,price,stock,sold FROM products ORDER BY sold DESC, id ASC LIMIT ?";
@@ -183,15 +261,31 @@ public class Inventory {
         }
     }
 
-    public void saveToFile(String filename) {
+    /**
+     * No-op because persistence is fully handled by MySQL in this implementation.
+     * <p>
+     * Kept for API compatibility with the file-based version used by the console app.
+     */
+    public void saveToFile() {
         // no-op; persistence is now MySQL
     }
 
+    /**
+     * Maps a JDBC {@link ResultSet} row to a {@link Product} instance.
+     * <p>
+     * Note: this uses reflection to populate the {@code sold} field to avoid exposing a public mutator.
+     *
+     * @param rs positioned result set
+     * @return product corresponding to the current row
+     * @throws SQLException on JDBC access errors
+     */
     private static Product map(ResultSet rs) throws SQLException {
+        // Ensure constructor argument order matches your Product class:
+        // Product(int id, String category, String name, double price, int stock)
         Product p = new Product(
                 rs.getInt("id"),
-                rs.getString("name"),
                 rs.getString("category"),
+                rs.getString("name"),
                 rs.getDouble("price"),
                 rs.getInt("stock")
         );
